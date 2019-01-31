@@ -1,0 +1,15 @@
+{
+   "description": "sntp is an application that can be used to sync the device time to the internet.",
+   "github": "https://github.com/StratifyLabs/sntp",
+   "name": "sntp",
+   "permissions": "public",
+   "publisher": "Stratify Labs, Inc",
+   "tags": "demo",
+   "type": "app",
+   "uid": "9cQyOTk3fZXOuMtPyf5j9X4H4b83",
+   "version": "0.1",
+   "ramSize": 0,
+   "timestamp": 1543102100,
+   "documentId": "",
+   "hardwareId": ""
+}

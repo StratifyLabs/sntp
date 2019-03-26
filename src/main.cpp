@@ -59,13 +59,21 @@ int main(int argc, char * argv[]){
 	} else if( cli.get_option("time") == "true" ){
 		p.info("using time procotol");
 		t = get_time_using_time_protocol();
-	} else {
+	} else if( cli.get_option("ntp") == "true" ){
 		p.info("using network time procotol");
 		t = get_time_using_network_time_protocol();
+	} else {
+		p.info("use --<daytime|time|ntp> to get time");
+		p.info("use --sync to sync device to internet time");
+		exit(1);
 	}
 
 	if( t != 0 ){
-		p.debug("internet time is %s", ctime(&t));
+		String internet_time;
+		internet_time = ctime(&t);
+		internet_time.replace("\n", "");
+		internet_time.replace("\r", "");
+		p.debug("internet time is %s", internet_time.cstring());
 	}
 
 	if( t != 0 && cli.get_option("sync") == "true" ){
@@ -111,7 +119,6 @@ time_t get_time_using_network_time_protocol(){
 		SocketAddress socket_address(address_list.at(i), 123);
 		Socket socket;
 		SocketOption option;
-
 
 		if( socket.create(socket_address) < 0 ){
 			printf("Failed to create socket");
@@ -271,6 +278,7 @@ time_t get_time_using_time_protocol(){
 											 SocketAddressInfo::TYPE_STREAM,
 											 SocketAddressInfo::PROTOCOL_TCP);
 
+
 	address_list = address_info.fetch_node("time.nist.gov");
 
 	for(i=0; i < address_list.count(); i++){
@@ -316,3 +324,87 @@ time_t get_time_using_time_protocol(){
 	packet.to_u32()[0] = ntohl(packet.at_u32(0));
 	return packet.at_u32(0) - NTP_TIMESTAMP_DELTA;
 }
+
+/*
+
+dns_tmr: dns_check_entries
+dns_tmr: dns_check_entries
+dns_tmr: dns_check_entries
+dns_tmr: dns_check_entries
+dns_tmr: dns_check_entries
+INFO:SYS:process_start:/app/ram/sntp
+INFO:SYS:process start: execute /app/ram/sntp --time --verbose=debug
+INFO:SYS:process_start:returned 1
+INFO:SOCKET:SEM Init 0x200182e4 0x20018324
+dns_enqueue: "pureaire-a2f7e.firebaseio.com": use DNS entry 0
+dns_enqueue: "pureaire-a2f7e.firebaseio.com": use DNS pcb 0
+dns_send: dns_servers[0] "pureaire-a2f7e.firebaseio.com": request
+sending DNS request ID 36047 for name "pureaire-a2f7e.firebaseio.com" to server 0
+ip4_output_if: et0
+IP header:
++-------------------------------+
+| 4 | 5 |  0x00 |        75     | (v, hl, tos, len)
++-------------------------------+
+|        2      |000|       0   | (id, flags, offset)
++-------------------------------+
+|  255  |   17  |    0x0000     | (ttl, proto, chksum)
++-------------------------------+
+|  192  |  168  |    1  |   16  | (src)
++-------------------------------+
+|  192  |  168  |    1  |    1  | (dest)
++-------------------------------+
+ip4_output_if: call netif->output()
+INFO:SOCKET:write interface
+next:0x0
+0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0x0 0x80 0xE1 0x0 0x0 0x0 0x8 0x6 0x0 0x1 0x8 0x0 0x6 0x4 0x0 0x1 0x0 0x80 0xE1 0x0 0x0 0x0 0xC0 0xA8 0x1 0x10 0x0 0x0 0x0 0x0 0x0 0x0 0xC0 0xA8 0x1 0x1
+INFO:SOCKET:sent:42
+INFO:SOCKET:Got 60 bytesINFO:SOCKET:write interface
+
+next:0x0
+0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0x0 0x80 0xE1 0x0 0x0 0x0 0x8 0x6 0x0 0x1 0x8 0x0 0x6 0x4 0x0 0x1 0x0 0x80 0xE1 0x0 0x0 0x0 0xC0 0xA8 0x1 0x10 0x0 0x0 0x0 0x0 0x0 0x0 0xC0 0xA8 0x1 0x1
+INFO:SOCKET:sent:42
+dns_tmr: dns_check_entries
+dns_send: dns_servers[0] "pureaire-a2f7e.firebaseio.com": request
+sending DNS request ID 36047 for name "pureaire-a2f7e.firebaseio.com" to server 0
+ip4_output_if: et0
+IP header:
++-------------------------------+
+| 4 | 5 |  0x00 |        75     | (v, hl, tos, len)
++-------------------------------+
+|        3      |000|       0   | (id, flags, offset)
++-------------------------------+
+|  255  |   17  |    0x0000     | (ttl, proto, chksum)
++-------------------------------+
+|  192  |  168  |    1  |   16  | (src)
++-------------------------------+
+|  192  |  168  |    1  |    1  | (dest)
++-------------------------------+
+ip4_output_if: call netif->output()
+INFO:SOCKET:write interface
+INFO:SOCKET:sent:89
+INFO:SOCKET:Got 60 bytes
+INFO:SOCKET:Got 105 bytes
+ip_input: iphdr->dest 0x1001a8c0 netif->ip_addr 0x1001a8c0 (0x1a8c0, 0x1a8c0, 0x10000000)
+ip4_input: packet accepted on interface et
+ip4_input:
+IP header:
++-------------------------------+
+| 4 | 5 |  0x00 |        91     | (v, hl, tos, len)
++-------------------------------+
+|        0      |010|       0   | (id, flags, offset)
++-------------------------------+
+|   64  |   17  |    0xb730     | (ttl, proto, chksum)
++-------------------------------+
+|  192  |  168  |    1  |    1  | (src)
++-------------------------------+
+|  192  |  168  |    1  |   16  | (dest)
++-------------------------------+
+ip4_input: p->len 91 p->tot_len 91
+dns_recv: "pureaire-a2f7e.firebaseio.com": response = 35.201.97.85
+dns_tmr: dns_check_entries
+dns_tmr: dns_check_entries
+
+
+
+
+*/

@@ -4,12 +4,18 @@
    "name": "sntp",
    "permissions": "public",
    "publisher": "Stratify Labs, Inc",
-   "tags": "demo",
+   "tags": "utility",
    "type": "app",
    "uid": "9cQyOTk3fZXOuMtPyf5j9X4H4b83",
-   "version": "0.1",
+   "version": "0.3",
    "ramSize": 0,
-   "timestamp": 1543102100,
-   "documentId": "",
-   "hardwareId": ""
+   "timestamp": 1552190705,
+   "documentId": "r3LP4mOK03nJELPTdNeC",
+   "hardwareId": "",
+   "buildList": {
+      "M7doAtjZnYpaMgtxrODm": "0.1",
+      "hWm64kMLm0EwzRVbW7fT": "0.2",
+      "bb3HbTy3buNW5iGGDdyM": "0.3"
+   },
+   "readme": "IyBzbnRwCgpTaW1wbGUgTmV0d29yayBUaW1lIFByb3RvY29sIGltcGxlbWVuYXRpb24gYXBwbGljYXRpb24gZm9yIFN0cmF0aWZ5IE9TLgo="
 }

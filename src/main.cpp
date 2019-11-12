@@ -38,9 +38,9 @@ typedef struct MCU_PACK {
 	u32 txTm_f;         // 32 bits. Transmit time-stamp fraction of a second.
 } ntp_packet;              // Total: 384 bits or 48 bytes.
 
-static time_t get_time_using_network_time_protocol();
-static time_t get_time_using_daytime_protocol();
-static time_t get_time_using_time_protocol();
+static time_t get_time_using_network_time_protocol(int retry_count);
+static time_t get_time_using_daytime_protocol(int retry_count);
+static time_t get_time_using_time_protocol(int retry_count);
 
 static Printer p;
 
@@ -49,35 +49,52 @@ int main(int argc, char * argv[]){
 	cli.set_publisher(SL_CONFIG_PUBLISHER);
 	cli.handle_version();
 
-	p.set_verbose_level( cli.get_option("verbose") );
+	p.set_verbose_level( cli.get_option(
+									arg::OptionName("verbose")
+									)
+								);
 
 	time_t t;
 
-	if( cli.get_option("daytime") == "true" ){
+	int retry_count = cli.get_option(
+				arg::OptionName("retry")
+				).to_integer();
+	if( retry_count == 0 ){
+		retry_count = 20;
+	}
+
+	if( cli.get_option(arg::OptionName("daytime")) == "true" ){
 		p.info("using daytime procotol");
-		t = get_time_using_daytime_protocol();
-	} else if( cli.get_option("time") == "true" ){
+		t = get_time_using_daytime_protocol(retry_count);
+	} else if( cli.get_option(arg::OptionName("time")) == "true" ){
 		p.info("using time procotol");
-		t = get_time_using_time_protocol();
-	} else if( cli.get_option("ntp") == "true" ){
+		t = get_time_using_time_protocol(retry_count);
+	} else if( cli.get_option(arg::OptionName("ntp")) == "true" ){
 		p.info("using network time procotol");
-		t = get_time_using_network_time_protocol();
+		t = get_time_using_network_time_protocol(retry_count);
 	} else {
-		p.info("use --<daytime|time|ntp> to get time");
-		p.info("use --sync to sync device to internet time");
+		cli.show_options();
 		exit(1);
 	}
 
 	if( t != 0 ){
 		String internet_time;
 		internet_time = ctime(&t);
-		internet_time.replace("\n", "");
-		internet_time.replace("\r", "");
+		internet_time.replace(
+					arg::StringToErase("\n"),
+					arg::StringToInsert("")
+					);
+
+		internet_time.replace(
+					arg::StringToErase("\r"),
+					arg::StringToInsert("")
+					);
+
 		p.debug("internet time is %s", internet_time.cstring());
 	}
 
-	if( t != 0 && cli.get_option("sync") == "true" ){
-		if( Time::set_time_of_day(t) < 0 ){
+	if( t != 0 && cli.get_option(arg::OptionName("sync")) == "true" ){
+		if( Time::set_time_of_day(Time(t)) < 0 ){
 			p.error("failed to sync device time");
 		} else {
 			p.info("successfully synced internet time %s", ctime(&t));
@@ -86,19 +103,22 @@ int main(int argc, char * argv[]){
 
 	if( t == 0 ){
 		//failed to get the time
+		p.error("failed to get a timestamp from the internet");
 		exit(1);
 	}
 
 	return 0;
 }
 
-time_t get_time_using_network_time_protocol(){
-	StructuredData<ntp_packet> packet;
+time_t get_time_using_network_time_protocol(int retry_count){
+	ntp_packet raw_packet;
 	int result;
 	u32 i;
 
+	DataReference packet(raw_packet);
+
 	packet.fill(0);
-	packet->li_vn_mode = 0x1b; //request the time
+	raw_packet.li_vn_mode = 0x1b; //request the time
 
 	var::Vector<SocketAddressInfo> address_list;
 	SocketAddressInfo address_info(SocketAddressInfo::FAMILY_INET,
@@ -111,16 +131,18 @@ time_t get_time_using_network_time_protocol(){
 	for(i=0; i < address_list.count(); i++){
 
 		p.debug("Address info %d %d %d",
-				 address_list.at(i).family(),
-				 address_list.at(i).type(),
-				 address_list.at(i).protocol()
-				 );
+				  address_list.at(i).family(),
+				  address_list.at(i).type(),
+				  address_list.at(i).protocol()
+				  );
 
 		SocketAddress socket_address(address_list.at(i), 123);
 		Socket socket;
 		SocketOption option;
 
-		if( socket.create(socket_address) < 0 ){
+		if( socket.create(
+				 arg::SourceSocketAddress(socket_address)
+				 ) < 0 ){
 			printf("Failed to create socket");
 			continue;
 		}
@@ -129,23 +151,35 @@ time_t get_time_using_network_time_protocol(){
 
 		//make socket non-blocking -- may need to try write/read a few times
 
-		p.debug("write %ld bytes on port %d", packet.size(), socket_address.port());
+		p.debug("write %ld bytes on port:%d", packet.size(), socket_address.port());
 		packet.to_u32()[0] = 0;
-		if( (result = socket.write(packet, socket_address)) != (int)packet.size() ){
+		if( (result = socket.write(
+				  arg::SourceData(packet),
+				  arg::SourceSocketAddress(socket_address)
+				  )) != (int)packet.size() ){
 			p.error("failed to send the whole packet (%d, %d)", result, socket.error_number());
 			continue;
 		}
 
 
-		//Timer::wait_seconds(5);
-		p.debug("read");
+		Timer::wait_seconds(1);
 		int size = packet.size();
-		if( (result = socket.read(packet, socket_address)) != size ){
+		Timer read_timer;
+		read_timer.start();
+		while( read_timer < MicroTime::from_seconds(1) && (result != size) ){
+			p.debug("read %d", packet.size());
+			result = socket.read(
+						arg::DestinationData(packet),
+						arg::DestinationSocketAddress(socket_address)
+						);
+
+			chrono::wait_milliseconds(100);
+		}
+
+		if( result != size ){
 			p.error("response wasn't right (%d, %d)", result, socket.error_number());
 			continue;
 		}
-
-
 		break;
 	}
 
@@ -158,12 +192,12 @@ time_t get_time_using_network_time_protocol(){
 	return packet.at_u32(0) - NTP_TIMESTAMP_DELTA;
 }
 
-time_t get_time_using_daytime_protocol(){
-	Data packet(sizeof(u32));
+time_t get_time_using_daytime_protocol(int retry_count){
+	Data packet( arg::Size(sizeof(u32)) );
 	u32 i;
 	int result;
 	packet.fill(0);
-	Data response(256);
+	Data response( arg::Size(256) );
 
 	var::Vector<SocketAddressInfo> address_list;
 	SocketAddressInfo address_info(SocketAddressInfo::FAMILY_INET,
@@ -176,16 +210,16 @@ time_t get_time_using_daytime_protocol(){
 	for(i=0; i < address_list.count(); i++){
 
 		p.debug("Address info %d %d %d",
-				 address_list.at(i).family(),
-				 address_list.at(i).type(),
-				 address_list.at(i).protocol()
-				 );
+				  address_list.at(i).family(),
+				  address_list.at(i).type(),
+				  address_list.at(i).protocol()
+				  );
 
 		SocketAddress socket_address(address_list.at(i), 13);
 		Socket socket;
 		SocketOption option;
 
-		if( socket.create(socket_address) < 0 ){
+		if( socket.create(arg::SourceSocketAddress(socket_address)) < 0 ){
 			p.error("Failed to create socket");
 			continue;
 		}
@@ -193,12 +227,14 @@ time_t get_time_using_daytime_protocol(){
 		socket << option.ip_time_to_live(56);
 
 		p.debug("connect to %s:%d", socket_address.address_to_string().cstring(), socket_address.port());
-		if( (result = socket.connect(socket_address)) < 0 ){
+		if( (result = socket.connect(
+				  arg::SourceSocketAddress(socket_address)
+				  ) ) < 0 ){
 			p.error("Failed to connect to socket address -> %s:%d (%d, %d)",
-					 socket_address.address_to_string().cstring(),
-					 socket_address.port(),
-					 socket.error_number(),
-					 result);
+					  socket_address.address_to_string().cstring(),
+					  socket_address.port(),
+					  socket.error_number(),
+					  result);
 			continue;
 		}
 
@@ -227,20 +263,34 @@ time_t get_time_using_daytime_protocol(){
 		return 0;
 	}
 
-	String time_string(response.to_char(), response.size());
+	String time_string(response);
 
-	time_string.replace("\n", "");
-	time_string.replace("\r", "");
+	time_string.replace(
+				arg::StringToErase("\n"),
+				arg::StringToInsert("")
+				);
+
+	time_string.replace(
+				arg::StringToErase("\r"),
+				arg::StringToInsert("")
+				);
 
 	p.info("Time String: %s", time_string.cstring());
-	Tokenizer time_tokens(time_string, " ");
+	Tokenizer time_tokens(
+				arg::TokenEncodedString(time_string),
+				arg::TokenDelimeters(" ")
+				);
 
 	if( time_tokens.count() != 9 ){
 		p.error("bad format in time response (" F32U ")", time_tokens.count());
 		return 0;
 	}
 
-	Tokenizer date_tokens(time_tokens.at(1), "-");
+	Tokenizer date_tokens(
+				arg::TokenEncodedString(time_tokens.at(1)),
+				arg::TokenDelimeters("-")
+				);
+
 	if( date_tokens.count() != 3 ){
 		p.error("bad format in date response (" F32U ")", date_tokens.count());
 		return 0;
@@ -252,7 +302,12 @@ time_t get_time_using_daytime_protocol(){
 	time_struct.tm_mon = date_tokens.at(1).to_integer()-1;
 	time_struct.tm_mday = date_tokens.at(2).to_integer();
 
-	Tokenizer clock_tokens(time_tokens.at(2), ":");
+	Tokenizer clock_tokens(
+				arg::TokenEncodedString(time_tokens.at(2)),
+				arg::TokenDelimeters(":")
+				);
+
+
 	if( date_tokens.count() != 3 ){
 		p.error("bad format in clock response (" F32U ")", clock_tokens.count());
 		return 0;
@@ -264,8 +319,8 @@ time_t get_time_using_daytime_protocol(){
 	return mktime(&time_struct);
 }
 
-time_t get_time_using_time_protocol(){
-	Data packet(sizeof(u32));
+time_t get_time_using_time_protocol(int retry_count){
+	Data packet( arg::Size(sizeof(u32)) );
 	int result;
 	u32 i;
 	packet.fill(0);
@@ -286,35 +341,43 @@ time_t get_time_using_time_protocol(){
 		SocketAddress socket_address(address_list.at(i), 37);
 		Socket socket;
 
-		if( socket.create(socket_address) < 0 ){
+		if( socket.create(arg::SourceSocketAddress(socket_address)) < 0 ){
 			p.error("Failed to create socket");
 			continue;
 		}
 
-		if( (result = socket.connect(socket_address)) < 0 ){
-			p.error("Failed to connect to socket address -> %s:%d (%d, %d)",
-					 socket_address.address_to_string().cstring(),
-					 socket_address.port(),
-					 socket.error_number(),
-					 result);
-			continue;
-		}
+		int count = 0;
+		do {
+			if( (result = socket.connect(
+					  arg::SourceSocketAddress(socket_address)
+					  )) < 0 ){
+				p.error("Failed to connect to socket address -> %s:%d (%d, %d)",
+						  socket_address.address_to_string().cstring(),
+						  socket_address.port(),
+						  socket.error_number(),
+						  result);
+			} else {
 
 
-		p.debug("write %ld bytes on port %d", packet.size(), socket_address.port());
-		packet.to_u32()[0] = 0;
-		if( (result = socket.write(packet)) != (int)packet.size() ){
-			p.error("failed to send the whole packet (%d, %d)", result, socket.error_number());
-			continue;
-		}
+				p.debug("write %ld bytes on port:%d", packet.size(), socket_address.port());
+				packet.to_u32()[0] = 0;
+				if( (result = socket.write(packet)) != (int)packet.size() ){
+					p.error("failed to send the whole packet (%d, %d)", result, socket.error_number());
+				} else {
+					result = socket.read(
+								arg::DestinationData(packet),
+								arg::DestinationSocketAddress(socket_address)
+								);
+				}
+			}
 
-		p.debug("read");
-		int size = packet.size();
-		if( (result = socket.read(packet)) != size ){
-			p.error("response wasn't right (%d, %d)", result, socket.error_number());
-			continue;
+			socket.close();
+
+		} while( (result == 0)  && (count++ < retry_count) );
+
+		if( result > 0 ){
+			break;
 		}
-		break;
 	}
 
 	if( i == address_list.count() ){
